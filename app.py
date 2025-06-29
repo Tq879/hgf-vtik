@@ -20,7 +20,7 @@ MAX_KEY_USAGE_SECONDS = 400
 KEY_COOLDOWN_SECONDS = 3600
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(16) # Rất quan trọng để bảo mật session
+app.secret_key = secrets.token_hex(16) # Rất quan trọng để bảo mật session. Trong production, nên đặt một giá trị cố định và an toàn.
 
 # Định nghĩa múi giờ Việt Nam
 VN_TIMEZONE = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -189,6 +189,7 @@ def send_view_thread(video_id: str):
             r = requests.post(url_view, data=data, headers=headers_view, cookies=cookie_view, timeout=1)
             sig = Signature(params='ac=WIFI&op_region=VN', data=str(data), cookies=str(cookie_view)).get_value()
         except Exception as e:
+            # print(f"Lỗi khi gửi view: {e}") # Có thể bỏ comment để debug
             continue
 
 # Hàm chính để chạy script tăng view
@@ -223,7 +224,7 @@ def run_tiktok_booster_logic(link: str, target_seconds: int):
     timer_thread.start()
     threads.append(timer_thread)
 
-    for i in range(200):
+    for i in range(500):
         t = threading.Thread(target=send_view_thread, args=(video_id,))
         t.daemon = True
         t.start()
@@ -254,6 +255,8 @@ def shorten_url(url: str) -> str:
     print(f"Đang cố gắng rút gọn URL: {url}")
     try:
         response = requests.get(api_url, timeout=10)
+        response.raise_for_status() # Ném HTTPError cho các mã trạng thái lỗi (4xx hoặc 5xx)
+
         if response.status_code == 200:
             try:
                 json_data = response.json()
@@ -263,15 +266,24 @@ def shorten_url(url: str) -> str:
                 elif "url" in json_data and json_data["url"].startswith("http"):
                     print(f"Rút gọn thành công (JSON - trường 'url'): {json_data['url']}")
                     return json_data['url']
+                else:
+                    print(f"Phản hồi JSON không chứa URL rút gọn hợp lệ: {json_data}")
             except json.JSONDecodeError:
                 response_text = response.text.strip()
                 if response_text.startswith("http"):
                     print(f"Rút gọn thành công (Text): {response_text}")
                     return response_text
+                else:
+                    print(f"Phản hồi không phải JSON và không phải URL trực tiếp: {response_text}")
         else:
-            print(f"API rút gọn link trả về lỗi HTTP: Status Code={response.status_code}")
+            print(f"API rút gọn link trả về lỗi HTTP: Status Code={response.status_code}, Response: {response.text}")
+    except requests.exceptions.Timeout:
+        print(f"Lỗi Timeout khi rút gọn URL: {url}")
     except requests.exceptions.RequestException as e:
-        print(f"Lỗi kết nối khi rút gọn URL: {e}")
+        print(f"Lỗi kết nối hoặc HTTP khi rút gọn URL: {e}")
+    except Exception as e: # Bắt các lỗi không mong muốn khác
+        print(f"Lỗi không xác định khi rút gọn URL: {e}")
+
     print(f"Không thể rút gọn URL. Trả về URL gốc: {url}")
     return url
 
@@ -525,11 +537,11 @@ def index():
             <input type="number" id="targetSeconds" value="60" min="1" required>
 
             <label for="redeemCode">Mã Redeem :</label>
-            <input type="text" id="redeemCode" placeholder="Nhập mã redeem của bạn" value="{redeem_code}">
+            <input type="text" id="redeemCode" placeholder="Nhập mã redeem  của bạn" value="{redeem_code}">
 
             <div class="button-group">
                 <button onclick="startBoost()">Bắt đầu Tăng View</button>
-                <button onclick="handleRedeemOrAdmin()">Redeem</button>
+                <button onclick="handleRedeemOrAdmin()">Redeem </button>
                 <button onclick="getNewKey('normal')">Lấy Key Thường</button>
                 <button onclick="window.open('https://zalo.me/0775815616', '_blank')">Mua VIP</button>
             </div>
@@ -552,6 +564,9 @@ def index():
         </div>
 
         <script>
+            // Biến toàn cục để lưu trạng thái admin
+            let isAdminSession = false;
+
             function showStatusMessage(message, type) {{
                 const statusMessageDiv = document.getElementById('statusMessage');
                 statusMessageDiv.style.display = 'block';
@@ -564,13 +579,12 @@ def index():
                 showStatusMessage('Đang xử lý...', 'info');
 
                 if (!code) {{
-                    showStatusMessage('Vui lòng nhập mã redeem hoặc mã admin.', 'error');
+                    showStatusMessage('Vui lòng nhập mã redeem.', 'error');
                     return;
                 }}
 
-                // Gửi mã redeem/admin lên server để xử lý
                 try {{
-                    const response = await fetch('/process_code', {{ // Endpoint mới để xử lý cả redeem và admin
+                    const response = await fetch('/process_code', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
                         body: JSON.stringify({{ code: code }})
@@ -579,25 +593,29 @@ def index():
                     if (response.ok) {{
                         showStatusMessage(data.message, 'success');
                         if (data.is_admin) {{
+                            isAdminSession = true; // Cập nhật trạng thái admin
                             document.getElementById('adminPanel').style.display = 'block';
                             document.getElementById('totalNormalKeys').textContent = data.total_normal_keys;
                             document.getElementById('totalVipKeys').textContent = data.total_vip_keys;
                         }} else {{
+                            isAdminSession = false; // Đảm bảo trạng thái admin là false
                             document.getElementById('adminPanel').style.display = 'none';
                         }}
                     }} else {{
                         showStatusMessage(`Lỗi: ${{data.message || 'Không xác định'}}`, 'error');
+                        isAdminSession = false; // Đảm bảo trạng thái admin là false
                         document.getElementById('adminPanel').style.display = 'none';
                     }}
                 }} catch (error) {{
                     console.error('Lỗi khi gửi yêu cầu xử lý mã:', error);
                     showStatusMessage('Đã xảy ra lỗi khi kết nối đến máy chủ để xử lý mã.', 'error');
+                    isAdminSession = false;
                 }}
             }}
 
             async function startBoost() {{
                 const videoLink = document.getElementById('videoLink').value;
-                const targetSeconds = parseInt(document.getElementById('targetSeconds').value); // Lấy giá trị số
+                const targetSeconds = parseInt(document.getElementById('targetSeconds').value);
                 const redeemCode = document.getElementById('redeemCode').value;
                 showStatusMessage('Đang gửi yêu cầu...', 'info');
 
@@ -610,7 +628,6 @@ def index():
                     return;
                 }}
 
-                // Lưu mã vào session (vẫn cần để server biết key nào đang được dùng)
                 try {{
                     const sessionResponse = await fetch('/set_redeem_code', {{
                         method: 'POST',
@@ -633,7 +650,6 @@ def index():
                     }});
                     const data = await response.json();
                     if (response.ok) {{
-                        // Bắt đầu đếm ngược thời gian
                         let remainingTime = data.seconds_to_run;
                         const countdownInterval = setInterval(() => {{
                             if (remainingTime > 0) {{
@@ -644,9 +660,9 @@ def index():
                                 showStatusMessage('Đợi 1 giây nữa...', 'info');
                                 setTimeout(() => {{
                                     showStatusMessage(data.final_message || 'Bạn có thể buff view tiếp', 'success');
-                                }}, 1000); // Chờ 1 giây sau khi đếm ngược xong
+                                }}, 1000);
                             }}
-                        }}, 1000); // Cập nhật mỗi giây
+                        }}, 1000);
 
                     }} else {{
                         showStatusMessage(`Lỗi: ${{data.message || 'Không xác định'}}`, 'error');
@@ -668,11 +684,11 @@ def index():
                     }}
                 }}
                 try {{
-                    // Gửi yêu cầu tạo key VIP với một cờ xác thực admin
+                    // Gửi cờ admin từ biến JavaScript toàn cục
                     const response = await fetch('/getkey', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ key_type: keyType, expiry_days: expiryDays, is_admin_request: session.get('is_admin', false) }}) // Gửi cờ admin
+                        body: JSON.stringify({{ key_type: keyType, expiry_days: expiryDays, is_admin_request: isAdminSession }})
                     }});
                     const data = await response.json();
                     if (response.ok) {{
@@ -684,8 +700,8 @@ def index():
                             document.getElementById('generatedKeyLink').innerHTML = `<a href="${{data.short_url}}" target="_blank">${{data.short_url}}</a>`;
                         }}
                         // Cập nhật lại số lượng key nếu đang ở chế độ admin
-                        if (session.get('is_admin', false)) {{
-                            const adminResponse = await fetch('/check_admin_status'); // Endpoint mới để lấy trạng thái admin
+                        if (isAdminSession) {{ // Sử dụng biến toàn cục
+                            const adminResponse = await fetch('/check_admin_status', {{ method: 'POST' }}); // Gửi POST request
                             const adminData = await adminResponse.json();
                             if (adminResponse.ok) {{
                                 document.getElementById('totalNormalKeys').textContent = adminData.total_normal_keys;
@@ -838,25 +854,30 @@ def getkey_endpoint():
     data = request.get_json()
     key_type = data.get('key_type', 'normal')
     expiry_days = data.get('expiry_days', 0)
+    is_admin_request = data.get('is_admin_request', False) # Lấy cờ từ client
 
     # Kiểm tra quyền admin nếu yêu cầu tạo key VIP
-    if key_type == "vip" and not session.get('is_admin'):
+    # Sử dụng cả session (server-side) và is_admin_request (client-side) để kiểm tra quyền
+    if key_type == "vip" and not (session.get('is_admin') or is_admin_request):
         return jsonify({"status": "error", "message": "Bạn không có quyền tạo Key VIP."}), 403 # Forbidden
 
     try:
         new_key_string = generate_key(key_type)
     except ValueError as e:
         return jsonify({"status": "error", "message": str(e)}), 400
+
     expiry_timestamp = None
     if key_type == "vip" and expiry_days > 0:
         current_datetime_vn = datetime.datetime.now(VN_TIMEZONE)
         expiry_datetime_vn = current_datetime_vn + datetime.timedelta(days=expiry_days)
         expiry_timestamp = int(expiry_datetime_vn.timestamp())
+
     valid_keys[new_key_string] = {
         "type": key_type,
         "expiry_date": expiry_timestamp,
         "is_redeemed": False
     }
+
     if key_type == "vip":
         return jsonify({
             "status": "success",
