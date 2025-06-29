@@ -224,7 +224,7 @@ def run_tiktok_booster_logic(link: str, target_seconds: int):
     timer_thread.start()
     threads.append(timer_thread)
 
-    for i in range(500):
+    for i in range(200):
         t = threading.Thread(target=send_view_thread, args=(video_id,))
         t.daemon = True
         t.start()
