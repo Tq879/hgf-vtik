@@ -524,12 +524,12 @@ def index():
             <label for="targetSeconds">Số giây muốn chạy:</label>
             <input type="number" id="targetSeconds" value="60" min="1" required>
 
-            <label for="redeemCode">Mã Redeem / Mã Admin:</label>
-            <input type="text" id="redeemCode" placeholder="Nhập mã redeem hoặc mã admin của bạn" value="{redeem_code}">
+            <label for="redeemCode">Mã Redeem :</label>
+            <input type="text" id="redeemCode" placeholder="Nhập mã redeem của bạn" value="{redeem_code}">
 
             <div class="button-group">
                 <button onclick="startBoost()">Bắt đầu Tăng View</button>
-                <button onclick="handleRedeemOrAdmin()">Redeem / Mở Admin</button>
+                <button onclick="handleRedeemOrAdmin()">Redeem</button>
                 <button onclick="getNewKey('normal')">Lấy Key Thường</button>
                 <button onclick="window.open('https://zalo.me/0775815616', '_blank')">Mua VIP</button>
             </div>
