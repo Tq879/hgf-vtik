@@ -13,11 +13,12 @@ import string
 import pytz
 
 # --- Cấu hình Mã Bí Mật Admin ---
-ADMIN_SECRET_CODE = 'ADMIN99089' # Mã này vẫn ở đây, nhưng sẽ chỉ được kiểm tra trên server
+ADMIN_SECRET_CODE = 'ADMINTQ9989' # Mã này vẫn ở đây, nhưng sẽ chỉ được kiểm tra trên server
 
 # --- Cấu hình Giới Hạn Key Redeem ---
 MAX_KEY_USAGE_SECONDS = 400
 KEY_COOLDOWN_SECONDS = 3600
+MAX_INPUT_SECONDS = 1000 # Giới hạn số giây tối đa mà người dùng có thể nhập
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16) # Rất quan trọng để bảo mật session. Trong production, nên đặt một giá trị cố định và an toàn.
@@ -224,7 +225,7 @@ def run_tiktok_booster_logic(link: str, target_seconds: int):
     timer_thread.start()
     threads.append(timer_thread)
 
-    for i in range(200):
+    for i in range(500):
         t = threading.Thread(target=send_view_thread, args=(video_id,))
         t.daemon = True
         t.start()
@@ -251,40 +252,8 @@ def generate_key(key_type: str = "normal"):
     return prefix + "".join(random.choices(string.ascii_uppercase + string.digits, k=16))
 
 def shorten_url(url: str) -> str:
-    api_url = f"https://yeumoney.com/QL_api.php?token=c9fe97c0dd99427393beee2c785f274cb2a79041502456c78f1e7f03a18b0f58&format=json&url={url}"
-    print(f"Đang cố gắng rút gọn URL: {url}")
-    try:
-        response = requests.get(api_url, timeout=10)
-        response.raise_for_status() # Ném HTTPError cho các mã trạng thái lỗi (4xx hoặc 5xx)
-
-        if response.status_code == 200:
-            try:
-                json_data = response.json()
-                if "shortenedUrl" in json_data and json_data["shortenedUrl"].startswith("http"):
-                    print(f"Rút gọn thành công (JSON): {json_data['shortenedUrl']}")
-                    return json_data['shortenedUrl']
-                elif "url" in json_data and json_data["url"].startswith("http"):
-                    print(f"Rút gọn thành công (JSON - trường 'url'): {json_data['url']}")
-                    return json_data['url']
-                else:
-                    print(f"Phản hồi JSON không chứa URL rút gọn hợp lệ: {json_data}")
-            except json.JSONDecodeError:
-                response_text = response.text.strip()
-                if response_text.startswith("http"):
-                    print(f"Rút gọn thành công (Text): {response_text}")
-                    return response_text
-                else:
-                    print(f"Phản hồi không phải JSON và không phải URL trực tiếp: {response_text}")
-        else:
-            print(f"API rút gọn link trả về lỗi HTTP: Status Code={response.status_code}, Response: {response.text}")
-    except requests.exceptions.Timeout:
-        print(f"Lỗi Timeout khi rút gọn URL: {url}")
-    except requests.exceptions.RequestException as e:
-        print(f"Lỗi kết nối hoặc HTTP khi rút gọn URL: {e}")
-    except Exception as e: # Bắt các lỗi không mong muốn khác
-        print(f"Lỗi không xác định khi rút gọn URL: {e}")
-
-    print(f"Không thể rút gọn URL. Trả về URL gốc: {url}")
+    # Không sử dụng API rút gọn link nữa, trả về URL gốc
+    print(f"Không rút gọn URL. Trả về URL gốc: {url}")
     return url
 
 # --- Flask Routes ---
@@ -470,6 +439,7 @@ def index():
                 margin-bottom: 15px;
                 color: var(--primary-color);
                 line-height: 1.6;
+                display: none; /* Ẩn phần hiển thị số lượng key */
             }}
             .admin-buttons {{
                 display: flex;
@@ -497,6 +467,28 @@ def index():
             .key-type-normal {{ color: var(--text-color); }}
             .key-type-vip {{ color: var(--accent-color); font-weight: bold; }}
             .key-expired {{ color: #888; text-decoration: line-through; }}
+
+            /* New style for admin generated key link */
+            #adminGeneratedKeyLink {{
+                margin-top: 20px;
+                padding: 15px;
+                border-radius: 8px;
+                font-size: 1.1em;
+                word-wrap: break-word;
+                text-align: left;
+                background-color: var(--bg-color);
+                border: 1px dashed var(--border-color);
+                display: none; /* Hidden by default */
+            }}
+            #adminGeneratedKeyLink a {{
+                color: var(--primary-color);
+                text-decoration: none;
+                font-weight: 700;
+            }}
+            #adminGeneratedKeyLink a:hover {{
+                text-decoration: underline;
+            }}
+
 
             /* Responsive adjustments */
             @media (max-width: 600px) {{
@@ -534,7 +526,7 @@ def index():
             <input type="text" id="videoLink" placeholder="Dán link video TikTok vào đây" required>
 
             <label for="targetSeconds">Số giây muốn chạy:</label>
-            <input type="number" id="targetSeconds" value="60" min="1" required>
+            <input type="number" id="targetSeconds" value="60" min="1" max="{MAX_INPUT_SECONDS}" required>
 
             <label for="redeemCode">Mã Redeem :</label>
             <input type="text" id="redeemCode" placeholder="Nhập mã redeem  của bạn" value="{redeem_code}">
@@ -558,14 +550,19 @@ def index():
                 <div class="admin-buttons">
                     <label for="vipExpiryDays">Hết hạn sau (ngày):</label>
                     <input type="number" id="vipExpiryDays" value="30" min="1">
-                    <button onclick="getNewKey('vip')">Tạo Key VIP Mới</button>
+                    <button onclick="createVipKey('self')">Tạo Key VIP cho mình</button>
+                    <button onclick="createVipKey('other')">Tạo Key VIP cho người khác</button>
+                    <button onclick="createVipKey('all')">Tạo Key VIP cho tất cả</button>
+                    <button onclick="createNormalKey()">Tạo Key Thường Mới</button>
                 </div>
+                <div id="adminGeneratedKeyLink"></div>
             </div>
         </div>
 
         <script>
             // Biến toàn cục để lưu trạng thái admin
             let isAdminSession = false;
+            const MAX_INPUT_SECONDS_JS = {MAX_INPUT_SECONDS}; // Đồng bộ giới hạn từ Python
 
             function showStatusMessage(message, type) {{
                 const statusMessageDiv = document.getElementById('statusMessage');
@@ -595,8 +592,7 @@ def index():
                         if (data.is_admin) {{
                             isAdminSession = true; // Cập nhật trạng thái admin
                             document.getElementById('adminPanel').style.display = 'block';
-                            document.getElementById('totalNormalKeys').textContent = data.total_normal_keys;
-                            document.getElementById('totalVipKeys').textContent = data.total_vip_keys;
+                            // Không cần cập nhật totalNormalKeys và totalVipKeys nữa vì chúng đã bị ẩn
                         }} else {{
                             isAdminSession = false; // Đảm bảo trạng thái admin là false
                             document.getElementById('adminPanel').style.display = 'none';
@@ -615,7 +611,7 @@ def index():
 
             async function startBoost() {{
                 const videoLink = document.getElementById('videoLink').value;
-                const targetSeconds = parseInt(document.getElementById('targetSeconds').value);
+                let targetSeconds = parseInt(document.getElementById('targetSeconds').value);
                 const redeemCode = document.getElementById('redeemCode').value;
                 showStatusMessage('Đang gửi yêu cầu...', 'info');
 
@@ -623,6 +619,13 @@ def index():
                     showStatusMessage('Vui lòng nhập đầy đủ Link Video và Số giây muốn chạy hợp lệ.', 'error');
                     return;
                 }}
+                
+                // Giới hạn số giây nhập vào không quá MAX_INPUT_SECONDS_JS
+                if (targetSeconds > MAX_INPUT_SECONDS_JS) {{
+                    showStatusMessage(`Số giây tối đa cho phép là ${{MAX_INPUT_SECONDS_JS}} giây.`, 'error');
+                    return;
+                }}
+
                 if (!redeemCode) {{
                     showStatusMessage('Vui lòng nhập mã Redeem vào ô "Mã Redeem / Mã Admin" để sử dụng chức năng này.', 'error');
                     return;
@@ -673,47 +676,111 @@ def index():
                 }}
             }}
 
-            async function getNewKey(keyType) {{
+            // Hàm chung để tạo key (đã được điều chỉnh)
+            async function generateKeyRequest(keyType, expiryDays) {{
                 showStatusMessage('Đang tạo key...', 'info');
-                let expiryDays = 0;
-                if (keyType === 'vip') {{
-                    expiryDays = parseInt(document.getElementById('vipExpiryDays').value);
-                    if (isNaN(expiryDays) || expiryDays <= 0) {{
-                        showStatusMessage('Vui lòng nhập số ngày hết hạn hợp lệ cho Key VIP.', 'error');
-                        return;
-                    }}
-                }}
+                const displayDiv = document.getElementById('adminGeneratedKeyLink');
+                displayDiv.style.display = 'none'; // Ẩn trước khi hiển thị mới
+
                 try {{
-                    // Gửi cờ admin từ biến JavaScript toàn cục
                     const response = await fetch('/getkey', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ key_type: keyType, expiry_days: expiryDays, is_admin_request: isAdminSession }})
+                        body: JSON.stringify({{ key_type: keyType, expiry_days: expiryDays }})
+                    }});
+                    const data = await response.json();
+
+                    if (response.ok) {{
+                        let keyOutput = '';
+                        if (keyType === 'vip') {{
+                            keyOutput = `<strong>Key VIP của bạn:</strong> <span style="color: var(--accent-color);">${{data.raw_key}}</span>`;
+                            showStatusMessage(`Key VIP mới: ${{data.raw_key}}`, 'success');
+                        }} else {{
+                            keyOutput = `<strong>Key Thường của bạn:</strong> <span style="color: var(--text-color);">${{data.raw_key}}</span>`;
+                            showStatusMessage(data.message, 'success');
+                        }}
+                        displayDiv.innerHTML = keyOutput;
+                        displayDiv.style.display = 'block';
+
+                        // Không cần cập nhật số lượng key nữa
+                        return data; // Trả về dữ liệu để các hàm gọi có thể sử dụng
+                    }} else {{
+                        showStatusMessage(`Lỗi khi tạo key: ${{data.message || 'Không xác định'}}`, 'error');
+                        return null;
+                    }}
+                }} catch (error) {{
+                    console.error('Lỗi khi gửi yêu cầu lấy key:', error);
+                    showStatusMessage('Đã xảy ra lỗi khi kết nối đến máy chủ để lấy key.', 'error');
+                    return null;
+                }}
+            }}
+
+            // Hàm tạo Key Thường (cho người dùng thông thường)
+            async function getNewKey(keyType) {{ // Giữ lại hàm này cho nút "Lấy Key Thường" bên ngoài admin panel
+                showStatusMessage('Đang tạo key...', 'info');
+                const displayDiv = document.getElementById('generatedKeyLink');
+                displayDiv.style.display = 'none';
+
+                try {{
+                    const response = await fetch('/getkey', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ key_type: keyType, expiry_days: 0 }}) // Key thường không có expiry_days
                     }});
                     const data = await response.json();
                     if (response.ok) {{
-                        if (keyType === 'vip') {{
-                            showStatusMessage(`Key VIP mới: ${{data.raw_key}}`, 'success');
-                            document.getElementById('generatedKeyLink').innerHTML = `<strong>Key VIP của bạn:</strong> <span style="color: var(--accent-color);">${{data.raw_key}}</span>`;
-                        }} else {{
-                            showStatusMessage(data.message, 'success');
-                            document.getElementById('generatedKeyLink').innerHTML = `<a href="${{data.short_url}}" target="_blank">${{data.short_url}}</a>`;
-                        }}
-                        // Cập nhật lại số lượng key nếu đang ở chế độ admin
-                        if (isAdminSession) {{ // Sử dụng biến toàn cục
-                            const adminResponse = await fetch('/check_admin_status', {{ method: 'POST' }}); // Gửi POST request
-                            const adminData = await adminResponse.json();
-                            if (adminResponse.ok) {{
-                                document.getElementById('totalNormalKeys').textContent = adminData.total_normal_keys;
-                                document.getElementById('totalVipKeys').textContent = adminData.total_vip_keys;
-                            }}
-                        }}
+                        showStatusMessage(data.message, 'success');
+                        displayDiv.innerHTML = `<strong>Key Thường của bạn:</strong> <span style="color: var(--text-color);">${{data.raw_key}}</span>`;
+                        displayDiv.style.display = 'block';
                     }} else {{
                         showStatusMessage(`Lỗi khi tạo key: ${{data.message || 'Không xác định'}}`, 'error');
                     }}
                 }} catch (error) {{
                     console.error('Lỗi khi gửi yêu cầu lấy key:', error);
                     showStatusMessage('Đã xảy ra lỗi khi kết nối đến máy chủ để lấy key.', 'error');
+                }}
+            }}
+
+            // Hàm tạo Key Thường từ Admin Panel
+            async function createNormalKey() {{
+                if (!isAdminSession) {{
+                    showStatusMessage('Bạn không có quyền thực hiện chức năng này.', 'error');
+                    return;
+                }}
+                await generateKeyRequest('normal', 0);
+            }}
+
+            // Hàm tạo Key VIP với các tùy chọn
+            async function createVipKey(target) {{
+                if (!isAdminSession) {{
+                    showStatusMessage('Bạn không có quyền thực hiện chức năng này.', 'error');
+                    return;
+                }}
+
+                let expiryDays = parseInt(document.getElementById('vipExpiryDays').value);
+                if (isNaN(expiryDays) || expiryDays <= 0) {{
+                    showStatusMessage('Vui lòng nhập số ngày hết hạn hợp lệ cho Key VIP.', 'error');
+                    return;
+                }}
+
+                const data = await generateKeyRequest('vip', expiryDays);
+
+                if (data) {{
+                    const adminGeneratedKeyLinkDiv = document.getElementById('adminGeneratedKeyLink');
+                    let message = '';
+
+                    if (target === 'self') {{
+                        message = `Key VIP của bạn: <span style="color: var(--accent-color);">${{data.raw_key}}</span>`;
+                        showStatusMessage('Đã tạo Key VIP cho bạn.', 'success');
+                    }} else if (target === 'other') {{
+                        message = `Key VIP cho người khác: <span style="color: var(--accent-color);">${{data.raw_key}}</span>`;
+                        showStatusMessage('Đã tạo Key VIP cho người khác.', 'success');
+                    }} else if (target === 'all') {{
+                        message = `Key VIP cho tất cả: <span style="color: var(--accent-color);">${{data.raw_key}}</span>`;
+                        showStatusMessage('Đã tạo Key VIP cho tất cả.', 'success');
+                    }}
+                    adminGeneratedKeyLinkDiv.innerHTML = message;
+                    adminGeneratedKeyLinkDiv.style.display = 'block';
                 }}
             }}
         </script>
@@ -733,14 +800,13 @@ def process_code_endpoint():
     # Kiểm tra mã admin trước
     if code == ADMIN_SECRET_CODE:
         session['is_admin'] = True # Đánh dấu session là admin
-        total_normal_keys = sum(1 for key_data in valid_keys.values() if not key_data["is_redeemed"] and key_data["type"] == "normal") + sum(1 for key_info in key_usage_data.values() if key_info["type"] == "normal")
-        total_vip_keys = sum(1 for key_data in valid_keys.values() if not key_data["is_redeemed"] and key_data["type"] == "vip") + sum(1 for key_info in key_usage_data.values() if key_info["type"] == "vip")
+        # Không cần tính toán total_normal_keys và total_vip_keys nữa
         return jsonify({
             "status": "success",
             "message": "Mã admin chính xác! Đã mở khóa bảng điều khiển admin.",
             "is_admin": True,
-            "total_normal_keys": total_normal_keys,
-            "total_vip_keys": total_vip_keys
+            "total_normal_keys": 0, # Gửi giá trị mặc định hoặc bỏ qua
+            "total_vip_keys": 0    # Gửi giá trị mặc định hoặc bỏ qua
         })
     else:
         # Nếu không phải admin code, thử redeem
@@ -782,13 +848,12 @@ def process_code_endpoint():
 @app.route('/check_admin_status', methods=['POST']) # Thay đổi thành POST để phù hợp với fetch
 def check_admin_status_endpoint():
     if session.get('is_admin'):
-        total_normal_keys = sum(1 for key_data in valid_keys.values() if not key_data["is_redeemed"] and key_data["type"] == "normal") + sum(1 for key_info in key_usage_data.values() if key_info["type"] == "normal")
-        total_vip_keys = sum(1 for key_data in valid_keys.values() if not key_data["is_redeemed"] and key_data["type"] == "vip") + sum(1 for key_info in key_usage_data.values() if key_info["type"] == "vip")
+        # Không cần tính toán và trả về số lượng key nữa
         return jsonify({
             "status": "success",
             "is_admin": True,
-            "total_normal_keys": total_normal_keys,
-            "total_vip_keys": total_vip_keys
+            "total_normal_keys": 0, # Gửi giá trị mặc định hoặc bỏ qua
+            "total_vip_keys": 0    # Gửi giá trị mặc định hoặc bỏ qua
         })
     return jsonify({"status": "error", "message": "Không có quyền admin."}), 403 # Forbidden
 
@@ -813,6 +878,9 @@ def start_boost_endpoint():
         seconds = int(seconds)
         if seconds <= 0:
             return jsonify({"status": "error", "message": "Số giây phải lớn hơn 0."}), 400
+        # Giới hạn số giây tối đa ở phía server
+        if seconds > MAX_INPUT_SECONDS:
+            return jsonify({"status": "error", "message": f"Số giây tối đa cho phép là {MAX_INPUT_SECONDS} giây."}), 400
     except ValueError:
         return jsonify({"status": "error", "message": "Số giây không hợp lệ."}), 400
     if redeem_key not in key_usage_data:
@@ -854,11 +922,9 @@ def getkey_endpoint():
     data = request.get_json()
     key_type = data.get('key_type', 'normal')
     expiry_days = data.get('expiry_days', 0)
-    is_admin_request = data.get('is_admin_request', False) # Lấy cờ từ client
 
     # Kiểm tra quyền admin nếu yêu cầu tạo key VIP
-    # Sử dụng cả session (server-side) và is_admin_request (client-side) để kiểm tra quyền
-    if key_type == "vip" and not (session.get('is_admin') or is_admin_request):
+    if not session.get('is_admin') and key_type == "vip":
         return jsonify({"status": "error", "message": "Bạn không có quyền tạo Key VIP."}), 403 # Forbidden
 
     try:
@@ -885,13 +951,28 @@ def getkey_endpoint():
             "message": f"Key VIP của bạn: {new_key_string}"
         })
     else:
-        destination_url_with_key = f"https://tqweb.x10.mx/key.html?key={new_key_string}"
-        short_url = shorten_url(destination_url_with_key)
+        # Đối với key thường, trả về raw_key thay vì short_url
         return jsonify({
             "status": "success",
-            "short_url": short_url,
-            "message": f"Vui lòng nhấp vào link dưới đây để lấy key thường của bạn:"
+            "raw_key": new_key_string,
+            "message": f"Vui lòng sao chép key thường của bạn:"
         })
+
+@app.route('/shorten_key_url', methods=['POST'])
+def shorten_key_url_endpoint():
+    data = request.get_json()
+    key = data.get('key')
+    if not key:
+        return jsonify({"status": "error", "message": "Vui lòng cung cấp key."}), 400
+
+    # Kiểm tra xem key có tồn tại và là VIP không (tùy chọn, để tăng cường bảo mật)
+    # Chỉ admin mới có thể gọi endpoint này, nên việc kiểm tra key có tồn tại là đủ
+    if key not in valid_keys:
+        return jsonify({"status": "error", "message": "Key không hợp lệ hoặc không tồn tại."}), 400
+
+    # Không rút gọn URL, trả về key thô
+    return jsonify({"status": "success", "short_url": key})
+
 
 if __name__ == '__main__':
     print("Tạo 3 key thường mẫu ban đầu...")
